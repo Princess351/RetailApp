@@ -1,0 +1,554 @@
+import sys
+import mysql.connector
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QLineEdit, QTableWidget, QTableWidgetItem, QMessageBox, QTabWidget, QSpinBox, QDateEdit,
+    QCheckBox, QScrollArea, QFileDialog, QDialog, QGridLayout
+)
+from PyQt5.QtCore import Qt, QDate
+import csv
+
+# ---------- Theme colors ----------
+BG = "#FBF9FD"
+CARD = "#F5F2FA"
+ACCENT = "#C9B6E4"
+ACCENT_DARK = "#A884D0"
+TEXT = "#2F2F2F"
+SUCCESS = "#6FCF97"
+ERROR = "#FF6B6B"
+WARN = "#FFD28A"
+
+class TechHavenDashboard(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("💜 TechHaven POS — TechHaven Retail Dashboard")
+        self.setGeometry(100, 100, 1200, 750)
+
+        # Database connection
+        try:
+            self.db = mysql.connector.connect(
+                host="localhost",
+                user="pythonuser",
+                password="Veena@1999",
+                database="techhaven"
+            )
+            self.cursor = self.db.cursor(buffered=True)
+        except mysql.connector.Error as err:
+            QMessageBox.critical(self, "Database Error", f"Error connecting to MySQL:\n{err}")
+            sys.exit()
+
+        # Main layout
+        self.central = QWidget()
+        self.setCentralWidget(self.central)
+        main_layout = QVBoxLayout()
+        self.central.setLayout(main_layout)
+
+        # Header
+        header_layout = QHBoxLayout()
+        title = QLabel("💜 TechHaven POS")
+        title.setStyleSheet(f"font-size: 22px; font-weight: bold; color:{TEXT}")
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+
+        self.btn_home = QPushButton("Home")
+        self.btn_home.clicked.connect(lambda: self.tabs.setCurrentIndex(0))
+        self.btn_sales = QPushButton("Sales")
+        self.btn_sales.clicked.connect(lambda: self.tabs.setCurrentIndex(1))
+        self.btn_products = QPushButton("Products")
+        self.btn_products.clicked.connect(lambda: self.tabs.setCurrentIndex(2))
+        self.btn_reports = QPushButton("Reports")
+        self.btn_reports.clicked.connect(lambda: self.tabs.setCurrentIndex(3))
+        for btn in [self.btn_home, self.btn_sales, self.btn_products, self.btn_reports]:
+            btn.setStyleSheet(f"background-color:{CARD}; padding:6px")
+            header_layout.addWidget(btn)
+
+        main_layout.addLayout(header_layout)
+
+        # Tabs
+        self.tabs = QTabWidget()
+        main_layout.addWidget(self.tabs)
+
+        # Home tab
+        self.home_tab = QWidget()
+        self.home_layout = QVBoxLayout()
+        self.home_tab.setLayout(self.home_layout)
+        self.tabs.addTab(self.home_tab, "Home")
+        self.load_home()
+
+        # Sales tab
+        self.sales_tab = QWidget()
+        self.sales_layout = QVBoxLayout()
+        self.sales_tab.setLayout(self.sales_layout)
+        self.tabs.addTab(self.sales_tab, "Sales")
+        self.load_sales_tab()
+
+        # Products tab
+        self.products_tab = QWidget()
+        self.products_layout = QVBoxLayout()
+        self.products_tab.setLayout(self.products_layout)
+        self.tabs.addTab(self.products_tab, "Products")
+        self.load_products_tab()
+
+        # Reports tab
+        self.reports_tab = QWidget()
+        self.reports_layout = QVBoxLayout()
+        self.reports_tab.setLayout(self.reports_layout)
+        self.tabs.addTab(self.reports_tab, "Reports")
+        self.load_reports_tab()
+
+    # ---------------- Home ----------------
+    def load_home(self):
+        self.home_layout.addWidget(QLabel("📊 Dashboard Home"))
+        # Metrics placeholders
+        self.label_total_sales = QLabel("Total Sales Today: $0.00")
+        self.label_low_stock = QLabel("Products Low Stock: 0")
+        self.label_total_products = QLabel("Total Products: 0")
+        self.label_recent_sale = QLabel("Recent Sale: —")
+
+        for lbl in [self.label_total_sales, self.label_low_stock, self.label_total_products, self.label_recent_sale]:
+            lbl.setStyleSheet(f"font-size:16px; padding:6px; background-color:{CARD}")
+            self.home_layout.addWidget(lbl)
+
+        # Recent sales table
+        self.home_recent_table = QTableWidget()
+        self.home_recent_table.setColumnCount(4)
+        self.home_recent_table.setHorizontalHeaderLabels(["Sale ID","Customer","Total","Date"])
+        self.home_layout.addWidget(self.home_recent_table)
+        self.refresh_home()
+
+    def refresh_home(self):
+        today = QDate.currentDate().toString("yyyy-MM-dd")
+        try:
+            self.cursor.execute("SELECT IFNULL(SUM(total_amount),0) FROM sales WHERE sale_date=%s", (today,))
+            total_today = self.cursor.fetchone()[0]
+            self.label_total_sales.setText(f"Total Sales Today: ${total_today:,.2f}")
+        except:
+            pass
+        try:
+            self.cursor.execute("SELECT COUNT(*) FROM products WHERE quantity <=5")
+            low = self.cursor.fetchone()[0]
+            self.label_low_stock.setText(f"Products Low Stock: {low}")
+        except:
+            pass
+        try:
+            self.cursor.execute("SELECT COUNT(*) FROM products")
+            total_products = self.cursor.fetchone()[0]
+            self.label_total_products.setText(f"Total Products: {total_products}")
+        except:
+            pass
+        try:
+            self.cursor.execute("SELECT customer_name, total_amount FROM sales ORDER BY sale_date DESC LIMIT 1")
+            row = self.cursor.fetchone()
+            if row:
+                customer, total = row
+                self.label_recent_sale.setText(f"Recent Sale: {customer} — ${total:.2f}")
+        except:
+            pass
+
+        # Recent sales table
+        self.home_recent_table.setRowCount(0)
+        try:
+            self.cursor.execute("SELECT sale_id, customer_name, total_amount, sale_date FROM sales ORDER BY sale_date DESC LIMIT 8")
+            rows = self.cursor.fetchall()
+            self.home_recent_table.setRowCount(len(rows))
+            for i, row in enumerate(rows):
+                for j, val in enumerate(row):
+                    self.home_recent_table.setItem(i,j,QTableWidgetItem(str(val)))
+        except:
+            pass
+
+    # ---------------- Sales ----------------
+    def load_sales_tab(self):
+        header_layout = QHBoxLayout()
+        btn_add = QPushButton("Add Sale")
+        btn_add.clicked.connect(self.add_sale)
+        btn_update = QPushButton("Update Sale")
+        btn_update.clicked.connect(self.update_sale)
+        btn_delete = QPushButton("Delete Sale")
+        btn_delete.clicked.connect(self.delete_sale)
+        for btn in [btn_add, btn_update, btn_delete]:
+            header_layout.addWidget(btn)
+        self.sales_layout.addLayout(header_layout)
+
+        self.sales_table = QTableWidget()
+        self.sales_table.setColumnCount(4)
+        self.sales_table.setHorizontalHeaderLabels(["Sale ID","Customer","Total","Date"])
+        self.sales_layout.addWidget(self.sales_table)
+        self.load_sales()
+
+    def load_sales(self):
+        self.sales_table.setRowCount(0)
+        self.cursor.execute("SELECT * FROM sales ORDER BY sale_date DESC")
+        rows = self.cursor.fetchall()
+        self.sales_table.setRowCount(len(rows))
+        for i,row in enumerate(rows):
+            for j,val in enumerate(row):
+                self.sales_table.setItem(i,j,QTableWidgetItem(str(val)))
+
+    def add_sale(self):
+        dlg = SaleDialog(self)
+        dlg.exec_()
+        self.load_sales()
+        self.refresh_home()
+
+    def update_sale(self):
+        selected = self.sales_table.currentRow()
+        if selected < 0:
+            QMessageBox.warning(self, "Select Sale", "Please select a sale to update.")
+            return
+        sale_id = int(self.sales_table.item(selected, 0).text())
+        dlg = SaleDialog(self, sale_id)
+        dlg.exec_()
+        self.load_sales()
+        self.refresh_home()
+
+    def delete_sale(self):
+        selected = self.sales_table.currentRow()
+        if selected < 0:
+            QMessageBox.warning(self, "Select Sale", "Please select a sale to delete.")
+            return
+        sale_id = int(self.sales_table.item(selected, 0).text())
+        confirm = QMessageBox.question(self, "Confirm Delete",
+                                       f"Are you sure you want to delete sale ID {sale_id}?",
+                                       QMessageBox.Yes | QMessageBox.No)
+        if confirm == QMessageBox.Yes:
+            try:
+                # Restore product quantities
+                self.cursor.execute("SELECT product_id, quantity_sold FROM sale_items WHERE sale_id=%s", (sale_id,))
+                items = self.cursor.fetchall()
+                for pid, qty in items:
+                    self.cursor.execute("UPDATE products SET quantity=quantity+%s WHERE product_id=%s", (qty, pid))
+                # Delete sale items and sale
+                self.cursor.execute("DELETE FROM sale_items WHERE sale_id=%s", (sale_id,))
+                self.cursor.execute("DELETE FROM sales WHERE sale_id=%s", (sale_id,))
+                self.db.commit()
+                QMessageBox.information(self, "Deleted", "Sale deleted successfully")
+                self.load_sales()
+                self.refresh_home()
+            except mysql.connector.Error as e:
+                self.db.rollback()
+                QMessageBox.critical(self, "Error", f"Could not delete sale:\n{e}")
+
+    # ---------------- Products ----------------
+    def load_products_tab(self):
+        header_layout = QHBoxLayout()
+        btn_add = QPushButton("Add Product")
+        btn_add.clicked.connect(self.add_product)
+        btn_update = QPushButton("Update Product")
+        btn_update.clicked.connect(self.update_product)
+        btn_delete = QPushButton("Delete Product")
+        btn_delete.clicked.connect(self.delete_product)
+        for btn in [btn_add, btn_update, btn_delete]:
+            header_layout.addWidget(btn)
+        self.products_layout.addLayout(header_layout)
+
+        self.products_table = QTableWidget()
+        self.products_table.setColumnCount(4)
+        self.products_table.setHorizontalHeaderLabels(["Product ID","Name","Price","Qty"])
+        self.products_layout.addWidget(self.products_table)
+        self.load_products()
+
+    def load_products(self):
+        self.products_table.setRowCount(0)
+        self.cursor.execute("SELECT * FROM products")
+        rows = self.cursor.fetchall()
+        self.products_table.setRowCount(len(rows))
+        for i,row in enumerate(rows):
+            for j,val in enumerate(row):
+                self.products_table.setItem(i,j,QTableWidgetItem(str(val)))
+
+    def add_product(self):
+        dlg = ProductDialog(self)
+        dlg.exec_()
+        self.load_products()
+        self.refresh_home()
+
+    def update_product(self):
+        selected = self.products_table.currentRow()
+        if selected < 0:
+            QMessageBox.warning(self, "Select Product", "Please select a product to update.")
+            return
+        product_id = int(self.products_table.item(selected, 0).text())
+        dlg = ProductDialog(self, product_id)
+        dlg.exec_()
+        self.load_products()
+        self.refresh_home()
+
+    def delete_product(self):
+        selected = self.products_table.currentRow()
+        if selected < 0:
+            QMessageBox.warning(self, "Select Product", "Please select a product to delete.")
+            return
+        product_id = int(self.products_table.item(selected, 0).text())
+        confirm = QMessageBox.question(self, "Confirm Delete",
+                                       f"Are you sure you want to delete product ID {product_id}?",
+                                       QMessageBox.Yes | QMessageBox.No)
+        if confirm == QMessageBox.Yes:
+            try:
+                self.cursor.execute("DELETE FROM products WHERE product_id=%s", (product_id,))
+                self.db.commit()
+                QMessageBox.information(self, "Deleted", "Product deleted successfully")
+                self.load_products()
+                self.refresh_home()
+            except mysql.connector.Error as e:
+                self.db.rollback()
+                QMessageBox.critical(self,"Error",f"Could not delete product:\n{e}")
+
+    # ------------------ Reports ------------------
+    def load_reports_tab(self):
+        layout = QVBoxLayout()
+        self.reports_tab.setLayout(layout)
+
+        # Date range selection
+        frm = QHBoxLayout()
+        frm.addWidget(QLabel("Start Date:"))
+        self.start_entry = QDateEdit()
+        self.start_entry.setCalendarPopup(True)
+        self.start_entry.setDate(QDate.currentDate())
+        frm.addWidget(self.start_entry)
+        frm.addWidget(QLabel("End Date:"))
+        self.end_entry = QDateEdit()
+        self.end_entry.setCalendarPopup(True)
+        self.end_entry.setDate(QDate.currentDate())
+        frm.addWidget(self.end_entry)
+
+        btn_generate = QPushButton("Generate Report")
+        btn_generate.clicked.connect(self.generate_date_range_report)
+        frm.addWidget(btn_generate)
+
+        btn_export = QPushButton("Export CSV")
+        btn_export.clicked.connect(self.export_date_range_report)
+        frm.addWidget(btn_export)
+
+        layout.addLayout(frm)
+
+        self.report_table = QTableWidget()
+        self.report_table.setColumnCount(4)
+        self.report_table.setHorizontalHeaderLabels(["Sale ID","Customer","Total","Date"])
+        layout.addWidget(self.report_table)
+
+    def generate_date_range_report(self):
+        start_date = self.start_entry.date().toString("yyyy-MM-dd")
+        end_date = self.end_entry.date().toString("yyyy-MM-dd")
+        self.report_table.setRowCount(0)
+        self.cursor.execute(
+            "SELECT sale_id, customer_name, total_amount, sale_date FROM sales WHERE sale_date BETWEEN %s AND %s ORDER BY sale_date",
+            (start_date, end_date)
+        )
+        rows = self.cursor.fetchall()
+        if not rows:
+            QMessageBox.information(self, "No Data", f"No sales found between {start_date} and {end_date}")
+            return
+        total_sales = 0
+        self.report_table.setRowCount(len(rows)+1)
+        for i,row in enumerate(rows):
+            self.report_table.setItem(i,0,QTableWidgetItem(str(row[0])))
+            self.report_table.setItem(i,1,QTableWidgetItem(str(row[1])))
+            self.report_table.setItem(i,2,QTableWidgetItem(f"${row[2]:,.2f}"))
+            self.report_table.setItem(i,3,QTableWidgetItem(str(row[3])))
+            total_sales += row[2]
+        # Total row
+        self.report_table.setItem(len(rows),1,QTableWidgetItem("TOTAL"))
+        self.report_table.setItem(len(rows),2,QTableWidgetItem(f"${total_sales:,.2f}"))
+
+    def export_date_range_report(self):
+        start_date = self.start_entry.date().toString("yyyy-MM-dd")
+        end_date = self.end_entry.date().toString("yyyy-MM-dd")
+        self.cursor.execute(
+            "SELECT sale_id, customer_name, total_amount, sale_date FROM sales WHERE sale_date BETWEEN %s AND %s ORDER BY sale_date",
+            (start_date, end_date)
+        )
+        rows = self.cursor.fetchall()
+        if not rows:
+            QMessageBox.information(self, "No Data", f"No sales found between {start_date} and {end_date}")
+            return
+        filename,_ = QFileDialog.getSaveFileName(self,"Save CSV", f"sales_{start_date}_to_{end_date}.csv","CSV Files (*.csv)")
+        if filename:
+            with open(filename,"w",newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Sale ID","Customer","Total","Date"])
+                total_sales = 0
+                for row in rows:
+                    writer.writerow([row[0],row[1],f"{row[2]:.2f}",row[3]])
+                    total_sales += row[2]
+                writer.writerow(["","TOTAL",f"{total_sales:.2f}",""])
+            QMessageBox.information(self,"Exported",f"Report saved as {filename}")
+
+# ---------------- Sale Dialog ----------------
+class SaleDialog(QDialog):
+    def __init__(self, parent, sale_id=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add / Update Sale")
+        self.setGeometry(300, 200, 700, 400)
+        self.parent = parent
+        self.sale_id = sale_id
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        # Customer
+        frm = QGridLayout()
+        layout.addLayout(frm)
+        frm.addWidget(QLabel("Customer Name:"),0,0)
+        self.customer_entry = QLineEdit()
+        frm.addWidget(self.customer_entry,0,1)
+        frm.addWidget(QLabel("Sale Date:"),0,2)
+        self.sale_date = QDateEdit()
+        self.sale_date.setCalendarPopup(True)
+        self.sale_date.setDate(QDate.currentDate())
+        frm.addWidget(self.sale_date,0,3)
+
+        # Product list
+        self.scroll = QScrollArea()
+        layout.addWidget(self.scroll)
+        self.prod_widget = QWidget()
+        self.prod_layout = QHBoxLayout()
+        self.prod_widget.setLayout(self.prod_layout)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(self.prod_widget)
+
+        self.product_vars = []
+        parent.cursor.execute("SELECT product_id, product_name, price, quantity FROM products")
+        products = parent.cursor.fetchall()
+        for pid,name,price,qty in products:
+            vbox = QVBoxLayout()
+            checkbox = QCheckBox(f"{name}\n${price:.2f}\nStock:{qty}")
+            spin = QSpinBox()
+            spin.setValue(1)
+            spin.setMinimum(1)
+            vbox.addWidget(checkbox)
+            vbox.addWidget(spin)
+            self.prod_layout.addLayout(vbox)
+            self.product_vars.append((checkbox, spin, pid, price))
+
+        # Load existing sale
+        if sale_id:
+            self.load_existing_sale()
+
+        # Save button
+        btn_save = QPushButton("Save Sale")
+        btn_save.clicked.connect(self.save_sale)
+        layout.addWidget(btn_save)
+
+    def load_existing_sale(self):
+        self.parent.cursor.execute("SELECT customer_name, sale_date FROM sales WHERE sale_id=%s",(self.sale_id,))
+        row = self.parent.cursor.fetchone()
+        if row:
+            self.customer_entry.setText(row[0])
+            self.sale_date.setDate(QDate.fromString(str(row[1]),"yyyy-MM-dd"))
+        self.parent.cursor.execute("SELECT product_id, quantity_sold FROM sale_items WHERE sale_id=%s",(self.sale_id,))
+        sale_items = dict(self.parent.cursor.fetchall())
+        for checkbox, spin, pid, price in self.product_vars:
+            if pid in sale_items:
+                checkbox.setChecked(True)
+                spin.setValue(sale_items[pid])
+
+    def save_sale(self):
+        customer = self.customer_entry.text().strip()
+        sale_date = self.sale_date.date().toString("yyyy-MM-dd")
+        if not customer:
+            QMessageBox.warning(self,"Error","Enter customer name")
+            return
+        total = 0
+        items = []
+        for checkbox, spin, pid, price in self.product_vars:
+            if checkbox.isChecked():
+                qty = spin.value()
+                total += price*qty
+                items.append((pid, qty))
+        if not items:
+            QMessageBox.warning(self,"Error","Select at least one product")
+            return
+        try:
+            if self.sale_id:
+                # Restore old product quantities
+                self.parent.cursor.execute("SELECT product_id, quantity_sold FROM sale_items WHERE sale_id=%s",(self.sale_id,))
+                old_items = self.parent.cursor.fetchall()
+                for pid,qty in old_items:
+                    self.parent.cursor.execute("UPDATE products SET quantity=quantity+%s WHERE product_id=%s",(qty,pid))
+                # Update sale
+                self.parent.cursor.execute("UPDATE sales SET customer_name=%s,total_amount=%s,sale_date=%s WHERE sale_id=%s",
+                                           (customer,total,sale_date,self.sale_id))
+                self.parent.cursor.execute("DELETE FROM sale_items WHERE sale_id=%s",(self.sale_id,))
+            else:
+                self.parent.cursor.execute("INSERT INTO sales (customer_name,total_amount,sale_date) VALUES (%s,%s,%s)",
+                                           (customer,total,sale_date))
+                self.sale_id = self.parent.cursor.lastrowid
+            # Insert new items and update stock
+            for pid, qty in items:
+                self.parent.cursor.execute("INSERT INTO sale_items (sale_id, product_id, quantity_sold) VALUES (%s,%s,%s)",
+                                           (self.sale_id,pid,qty))
+                self.parent.cursor.execute("UPDATE products SET quantity=quantity-%s WHERE product_id=%s",(qty,pid))
+            self.parent.db.commit()
+            QMessageBox.information(self,"Saved","Sale saved successfully")
+            self.close()
+        except mysql.connector.Error as e:
+            self.parent.db.rollback()
+            QMessageBox.critical(self,"Error",f"Could not save sale:\n{e}")
+
+# ---------------- Product Dialog ----------------
+class ProductDialog(QDialog):
+    def __init__(self,parent,product_id=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add / Update Product")
+        self.setGeometry(400,300,400,200)
+        self.parent = parent
+        self.product_id = product_id
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        layout.addWidget(QLabel("Product Name:"))
+        self.name_entry = QLineEdit()
+        layout.addWidget(self.name_entry)
+        layout.addWidget(QLabel("Price:"))
+        self.price_entry = QLineEdit()
+        layout.addWidget(self.price_entry)
+        layout.addWidget(QLabel("Quantity:"))
+        self.qty_entry = QLineEdit()
+        layout.addWidget(self.qty_entry)
+
+        btn_save = QPushButton("Save Product")
+        btn_save.clicked.connect(self.save_product)
+        layout.addWidget(btn_save)
+
+        if product_id:
+            self.load_product()
+
+    def load_product(self):
+        self.parent.cursor.execute("SELECT product_name, price, quantity FROM products WHERE product_id=%s",(self.product_id,))
+        row = self.parent.cursor.fetchone()
+        if row:
+            self.name_entry.setText(row[0])
+            self.price_entry.setText(str(row[1]))
+            self.qty_entry.setText(str(row[2]))
+
+    def save_product(self):
+        name = self.name_entry.text().strip()
+        try:
+            price = float(self.price_entry.text())
+            qty = int(self.qty_entry.text())
+        except:
+            QMessageBox.warning(self,"Error","Enter valid price & quantity")
+            return
+        if not name:
+            QMessageBox.warning(self,"Error","Enter product name")
+            return
+        try:
+            if self.product_id:
+                self.parent.cursor.execute("UPDATE products SET product_name=%s,price=%s,quantity=%s WHERE product_id=%s",
+                                           (name,price,qty,self.product_id))
+            else:
+                self.parent.cursor.execute("INSERT INTO products (product_name,price,quantity) VALUES (%s,%s,%s)",
+                                           (name,price,qty))
+            self.parent.db.commit()
+            QMessageBox.information(self,"Saved","Product saved successfully")
+            self.close()
+        except mysql.connector.Error as e:
+            self.parent.db.rollback()
+            QMessageBox.critical(self,"Error",f"Could not save product:\n{e}")
+
+# ---------------- Run ----------------
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    win = TechHavenDashboard()
+    win.show()
+    sys.exit(app.exec_())
